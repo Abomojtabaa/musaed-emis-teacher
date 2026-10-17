@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'intro_screen.dart';
+import 'emis_webview_screen.dart';
 import 'app_core.dart';
 import 'google_speech_service.dart';
 
@@ -23,6 +24,77 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     _checkGoogleSpeech();
+  }
+
+  Future<void> _checkGoogleSpeech() async {
+    if (mounted) {
+      setState(() {
+        _checkingGoogleSpeech = true;
+        _googleSpeechMessage = 'جاري فحص خدمة التعرف الصوتي...';
+      });
+    }
+    try {
+      final info = await GoogleSpeechService.getInfo();
+      final available = info['available'] == true;
+      final message = (info['message'] ?? info['name'] ?? info['service'] ?? '')
+          .toString()
+          .trim();
+      if (!mounted) return;
+      setState(() {
+        _googleSpeechAvailable = available;
+        _googleSpeechMessage = message.isNotEmpty
+            ? message
+            : (available
+                ? 'خدمة التعرف الصوتي متاحة على هذا الجهاز.'
+                : 'خدمة Google Speech غير متاحة؛ يمكن تجربة محرك التعرف الافتراضي في Android.');
+        _checkingGoogleSpeech = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _googleSpeechAvailable = false;
+        _googleSpeechMessage = 'تعذر فحص خدمة التعرف الصوتي: $e';
+        _checkingGoogleSpeech = false;
+      });
+    }
+  }
+
+  Future<void> _setVoiceEnabled(bool enabled) async {
+    await AppCore.setVoiceInputEnabled(enabled);
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _setVoiceEngine(String? engine) async {
+    if (engine == null) return;
+    await AppCore.setVoiceRecognitionEngine(engine);
+    if (mounted) setState(() {});
+    if (engine == 'google') await _checkGoogleSpeech();
+  }
+
+  Future<void> _setVoiceSetting({
+    bool? autoRestart,
+    int? possibleSilenceMs,
+    int? completeSilenceMs,
+    int? minimumSpeechMs,
+    int? restartDelayMs,
+    int? finalizationTimeoutMs,
+    double? arrowOpacity,
+  }) async {
+    await AppCore.saveVoiceSettings(
+      autoRestart: autoRestart,
+      possibleSilenceMs: possibleSilenceMs,
+      completeSilenceMs: completeSilenceMs,
+      minimumSpeechMs: minimumSpeechMs,
+      restartDelayMs: restartDelayMs,
+      finalizationTimeoutMs: finalizationTimeoutMs,
+      arrowOpacity: arrowOpacity,
+    );
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _resetVoiceSettings() async {
+    await AppCore.resetVoiceSettings();
+    if (mounted) setState(() {});
   }
 
   Future<void> _logout() async {
