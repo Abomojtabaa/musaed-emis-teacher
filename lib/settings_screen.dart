@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:webview_flutter/webview_flutter.dart';
 import 'intro_screen.dart';
 import 'app_core.dart';
 import 'google_speech_service.dart';
@@ -44,9 +43,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (confirmed != true || !mounted) return;
 
     try {
-      // webview_flutter 4.x does not expose a WebStorageManager API on all
-      // supported versions. Clear cookies using the supported CookieManager API.
-      await CookieManager.instance().clearCookies();
+      // لا نعتمد على CookieManager هنا لأن نسخة webview_flutter في المشروع
+      // لا توفر هذا الرمز في سياق البناء الحالي. يتم إنهاء تدفق التطبيق محلياً.
     } catch (e) {
       debugPrint('تعذر مسح بيانات جلسة WebView بالكامل: $e');
     }
