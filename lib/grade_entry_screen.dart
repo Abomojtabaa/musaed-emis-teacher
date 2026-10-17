@@ -249,18 +249,34 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
     await _loadStudents();
   }
 
-  Set<String> _examIdCandidates(String selectedExamId) {
-    final candidates = <String>{selectedExamId.trim()};
-    final selected = _currentExam;
-    if (selected != null) {
+  Map<String, dynamic>? _findExamById(String id) {
+    final target = id.trim();
+    for (final exam in exams) {
       for (final key in const ['id', 'examId', 'exam_id', 'value']) {
-        final value = selected[key];
+        final val = exam[key];
+        if (val != null && '$val'.trim() == target) {
+          return exam;
+        }
+      }
+    }
+    return null;
+  }
+
+  Set<String> _examIdCandidatesForExam(Map<String, dynamic>? examObj, String fallbackId) {
+    final candidates = <String>{fallbackId.trim()};
+    if (examObj != null) {
+      for (final key in const ['id', 'examId', 'exam_id', 'value']) {
+        final value = examObj[key];
         if (value != null && '$value'.trim().isNotEmpty) {
           candidates.add('$value'.trim());
         }
       }
     }
     return candidates;
+  }
+
+  Set<String> _examIdCandidates(String selectedExamId) {
+    return _examIdCandidatesForExam(_findExamById(selectedExamId), selectedExamId);
   }
 
   Map<dynamic, dynamic>? _findStudentGradeForExam(
@@ -290,6 +306,74 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
         }
       }
     }
+    return null;
+  }
+
+  /// يستخرج درجة الطالب للامتحان المحدد، وإذا كان الامتحان عبارة عن معدل محسوب
+  /// (AVERAGE أو MAX) غير مخزن صراحةً في استجابة الخادم، يقوم بحسابه تلقائياً
+  /// من الامتحانات التي يعتمد عليها (dependsOn) تماماً كما يفعل موقع EMIS.
+  num? _resolveStudentGradeNumber(
+    Map<String, dynamic> student,
+    String targetExamId, [
+    Set<String>? visited,
+  ]) {
+    visited ??= <String>{};
+    final normalizedId = targetExamId.trim();
+    if (visited.contains(normalizedId)) return null;
+    visited.add(normalizedId);
+
+    final examMeta = _findExamById(normalizedId);
+    final candidateIds = _examIdCandidatesForExam(examMeta, normalizedId);
+
+    // 1. البحث عن قيمة مخزنة صراحةً في بيانات الطالب القادمة من الخادم
+    final directMatch = _findStudentGradeForExam(student, candidateIds);
+    if (directMatch != null) {
+      final rawVal = directMatch['grade'] ??
+          directMatch['score'] ??
+          directMatch['mark'] ??
+          directMatch['markScore'] ??
+          directMatch['scoreValue'] ??
+          directMatch['value'];
+      if (rawVal != null) {
+        final parsed = num.tryParse(_normalizeNumber('$rawVal'));
+        if (parsed != null) return parsed;
+      }
+    }
+
+    // 2. إذا لم توجد درجة مخزنة، نتحقق مما إذا كان الحقل معدلاً يُحسب عبر معادلة (AVERAGE / MAX)
+    if (examMeta == null) return null;
+    final typeObj = examMeta['type'];
+    if (typeObj is Map) {
+      final operation = '${typeObj['operation'] ?? ''}'.toUpperCase().trim();
+      final dependsOn = typeObj['dependsOn'];
+
+      if (dependsOn is List && dependsOn.isNotEmpty) {
+        final depValues = <num>[];
+        for (final depId in dependsOn) {
+          final val = _resolveStudentGradeNumber(
+            student,
+            '$depId',
+            Set<String>.from(visited),
+          );
+          if (val != null) {
+            depValues.add(val);
+          }
+        }
+
+        if (operation == 'AVERAGE') {
+          // في نظام EMIS، يظهر المعدل عند اكتمال الدرجات المعتمدة عليها
+          if (depValues.length == dependsOn.length && depValues.isNotEmpty) {
+            final sum = depValues.fold<num>(0, (a, b) => a + b);
+            return (sum / depValues.length).round();
+          }
+        } else if (operation == 'MAX') {
+          if (depValues.isNotEmpty) {
+            return depValues.reduce((a, b) => a > b ? a : b);
+          }
+        }
+      }
+    }
+
     return null;
   }
 
@@ -354,18 +438,11 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
       final result = await _getList(endpoint);
       _clearStudents();
 
-      final selectedExamIds = _examIdCandidates(examId!);
       for (final student in result) {
         final id = int.tryParse('${student['id']}');
         if (id == null) continue;
-        // Keep existing EMIS grades visible when reopening an exam instead
-        // of presenting an empty input over a grade already stored remotely.
-        final existing = _findStudentGradeForExam(student, selectedExamIds);
-        final existingValue = existing == null
-            ? null
-            : (existing['grade'] ?? existing['score'] ??
-                existing['mark'] ?? existing['markScore'] ??
-                existing['scoreValue'] ?? existing['value']);
+        // قراءة الدرجة المخزنة أو احتساب المعدل التلقائي (في حال كان الامتحان المختار معدلاً)
+        final existingValue = _resolveStudentGradeNumber(student, examId!);
         final initialText = existingValue == null ? '' : '$existingValue';
         _originalGrades[id] = initialText;
         grades[id] = TextEditingController(text: initialText);
@@ -563,9 +640,11 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
       }
 
       if (text.isNotEmpty) {
-        final studentIds = grades.keys.toList();
-        if (_sequentialVoiceIndex >= 0 && _sequentialVoiceIndex < studentIds.length) {
-          final targetStudentId = studentIds[_sequentialVoiceIndex];
+        final targetStudentId = _activeStudentVoiceId ??
+            ((_sequentialVoiceIndex >= 0 && _sequentialVoiceIndex < grades.keys.length)
+                ? grades.keys.elementAt(_sequentialVoiceIndex)
+                : null);
+        if (targetStudentId != null) {
           final controller = grades[targetStudentId];
           if (controller != null) {
             controller.value = TextEditingValue(
@@ -679,7 +758,10 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
     setState(() => _voiceSequentialMode = !_voiceSequentialMode);
     if (_voiceSequentialMode && students.isNotEmpty) {
       _sequentialVoiceIndex = 0;
-      await _toggleVoiceInput(students.first['id']);
+      final firstId = int.tryParse('${students.first['id']}');
+      if (firstId != null) {
+        await _toggleVoiceInput(firstId);
+      }
     } else {
       _stopSequentialVoiceMode();
     }
@@ -929,14 +1011,13 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
       var endpoint = '/examscore/getstudentswithgrades?schoolId=${widget.schoolId}&stageId=$stageId&subjectId=$subjectId';
       if (roomId != null && roomId!.isNotEmpty) endpoint += '&classroomId=$roomId';
       final result = await _getList(endpoint);
-      final selectedExamIds = _examIdCandidates(examId!);
       if (!mounted) return;
       setState(() {
+        students = result;
         for (final student in result) {
           final id = int.tryParse('${student['id']}');
           if (id == null || !grades.containsKey(id)) continue;
-          final existing = _findStudentGradeForExam(student, selectedExamIds);
-          final value = existing == null ? null : (existing['grade'] ?? existing['score'] ?? existing['mark'] ?? existing['markScore'] ?? existing['scoreValue'] ?? existing['value']);
+          final value = _resolveStudentGradeNumber(student, examId!);
           // If server omits an empty/deleted grade, reflect that. Otherwise
           // update with the authoritative value, including calculated exams.
           if (value != null) {
