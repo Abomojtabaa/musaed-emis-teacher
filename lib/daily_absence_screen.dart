@@ -43,10 +43,10 @@ class _DailyAbsenceScreenState extends State<DailyAbsenceScreen> {
       };
 
   String _id(Map<String, dynamic> x) =>
-      '${x['value'] ?? x['id'] ?? x['stageId'] ?? x['classroomId'] ?? ''}';
+      '${x['value'] ?? x['id'] ?? x['stageId'] ?? x['subjectId'] ?? x['classroomId'] ?? x['classRoomId'] ?? x['classroomID'] ?? x['studentId'] ?? ''}';
 
   String _label(Map<String, dynamic> x) =>
-      '${x['displayName'] ?? x['label'] ?? x['name'] ?? x['text'] ?? _id(x)}';
+      '${x['displayName'] ?? x['label'] ?? x['name'] ?? x['text'] ?? x['title'] ?? _id(x)}';
 
   bool _bool(dynamic value) =>
       value == true || value == 1 || '$value'.toLowerCase() == 'true';
@@ -79,13 +79,38 @@ class _DailyAbsenceScreenState extends State<DailyAbsenceScreen> {
     return body.trim().isEmpty ? <String, dynamic>{} : jsonDecode(body);
   }
 
+  // EMIS APIs لا تستخدم غلاف استجابة واحداً دائماً:
+  // بعض القوائم تعود مباشرة، وغيابات الحصص تعود بالشكل
+  // { data: { id: ..., data: [ ...students ] } }.
   List<Map<String, dynamic>> _maps(dynamic raw) {
-    if (raw is Map && raw['data'] != null) raw = raw['data'];
-    if (raw is! List) return [];
-    return [
-      for (final item in raw)
-        if (item is Map) Map<String, dynamic>.from(item),
-    ];
+    for (var depth = 0; depth < 5; depth++) {
+      if (raw is List) {
+        return [
+          for (final item in raw)
+            if (item is Map) Map<String, dynamic>.from(item),
+        ];
+      }
+      if (raw is Map) {
+        if (raw['data'] is List) {
+          raw = raw['data'];
+          continue;
+        }
+        if (raw['data'] is Map) {
+          raw = raw['data'];
+          continue;
+        }
+        if (raw['items'] is List) {
+          raw = raw['items'];
+          continue;
+        }
+        if (raw['results'] is List) {
+          raw = raw['results'];
+          continue;
+        }
+      }
+      break;
+    }
+    return [];
   }
 
   @override
@@ -174,10 +199,13 @@ class _DailyAbsenceScreenState extends State<DailyAbsenceScreen> {
       setState(() {
         rooms = result;
         loadingStudents = false;
+        if (result.length == 1) {
+          roomId = _id(result.first);
+        }
       });
-      // The official EMIS absence request is classroom-scoped. Wait for a
-      // classroom selection when the API returns classroom choices.
-      if (result.isEmpty) await _loadStudents();
+      // If there is only one available classroom, select it automatically.
+      // Otherwise wait for the teacher to choose a classroom explicitly.
+      if (result.isEmpty || result.length == 1) await _loadStudents();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -215,8 +243,7 @@ class _DailyAbsenceScreenState extends State<DailyAbsenceScreen> {
       if (decoded is Map && decoded['data'] is Map) {
         wrapper = decoded['data'];
       }
-      final list = wrapper is Map ? wrapper['data'] : null;
-      final parsed = _maps(list);
+      final parsed = _maps(decoded);
       if (wrapper is Map) {
         recordId = int.tryParse('${wrapper['id'] ?? 0}') ?? 0;
       }
@@ -446,7 +473,7 @@ class _DailyAbsenceScreenState extends State<DailyAbsenceScreen> {
                       ...List.generate(students.length, (index) {
                         final student = students[index];
                         final absent = _bool(student['isAbsent']);
-                        final name = '${student['name'] ?? student['studentName'] ?? 'طالب'}'.trim();
+                        final name = '${student['name'] ?? student['studentName'] ?? student['fullName'] ?? student['displayName'] ?? 'طالب'}'.trim();
                         final studentId = '${student['studentId'] ?? student['id'] ?? ''}';
                         return Card(
                           color: dark ? const Color(0xFF1E1E1E) : Colors.white,
