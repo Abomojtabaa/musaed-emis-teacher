@@ -39,8 +39,6 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
   bool loading = true;
   bool loadingStudents = false;
   bool saving = false;
-  bool togglingIgnore = false;
-  bool? examIgnored;
   String? error;
 
   bool _speechListening = false;
@@ -183,7 +181,6 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
       rooms = [];
       exams = [];
       students = [];
-      examIgnored = null;
       error = null;
     });
     try {
@@ -206,7 +203,6 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
       rooms = [];
       exams = [];
       students = [];
-      examIgnored = null;
       error = null;
     });
     try {
@@ -244,37 +240,10 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
     _clearStudents();
     setState(() {
       examId = value;
-      examIgnored = _readExamIgnored();
       students = [];
       error = null;
     });
     await _loadStudents();
-  }
-
-  bool? _readExamIgnored() {
-    final exam = _currentExam;
-    if (exam == null) return null;
-    return _readIgnoredFlagFromMap(exam);
-  }
-
-  bool? _readIgnoredFlagFromMap(Map<dynamic, dynamic> value) {
-    for (final key in const [
-      'isIgnored',
-      'ignored',
-      'isIgnore',
-      'isExamIgnored',
-      'isIgnoredExam',
-      'ignore',
-    ]) {
-      if (value.containsKey(key) && value[key] != null) {
-        return _bool(value[key]);
-      }
-    }
-    final exam = value['exam'];
-    if (exam is Map) return _readIgnoredFlagFromMap(exam);
-    final examInfo = value['examInfo'];
-    if (examInfo is Map) return _readIgnoredFlagFromMap(examInfo);
-    return null;
   }
 
   Set<String> _examIdCandidates(String selectedExamId) {
@@ -296,7 +265,7 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
     Set<String> selectedExamIds,
   ) {
     final rawGrades =
-        student['grades'] ?? student['examScores'] ?? student['scores'] ?? student['marks'];
+        student['grades'] ?? student['examScores'] ?? student['examGrades'] ?? student['scores'] ?? student['marks'];
 
     if (rawGrades is List) {
       for (final item in rawGrades) {
@@ -320,53 +289,36 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
     return null;
   }
 
-  bool _detectIgnoredStateFromStudents(
-    List<Map<String, dynamic>> rows,
-    String selectedExamId,
-  ) {
-    final explicitFlag = _readExamIgnored();
-    if (explicitFlag != null) return explicitFlag;
-    if (rows.isEmpty) return false;
-
-    final selectedExamIds = _examIdCandidates(selectedExamId);
-    int matchedGradesCount = 0;
-    int ignoredGradesCount = 0;
-
-    for (final student in rows) {
-      final selectedGrade = _findStudentGradeForExam(student, selectedExamIds);
-      if (selectedGrade == null) continue;
-
-      final rawGrade = selectedGrade['grade'] ??
-          selectedGrade['score'] ??
-          selectedGrade['mark'] ??
-          selectedGrade['value'];
-
-      if (rawGrade == null || '$rawGrade'.trim().isEmpty) continue;
-
-      final numericGrade =
-          rawGrade is num ? rawGrade : num.tryParse('$rawGrade'.trim());
-      if (numericGrade == null) continue;
-
-      matchedGradesCount++;
-      if (numericGrade == -3) {
-        ignoredGradesCount++;
-      } else {
-        return false;
-      }
-    }
-
-    if (matchedGradesCount > 0 && ignoredGradesCount == matchedGradesCount) {
-      return true;
-    }
-
-    return false;
-  }
-
   Map<String, dynamic>? get _currentExam {
     for (final exam in exams) {
       if (_id(exam) == examId) return exam;
     }
     return null;
+  }
+
+  String _normalizeExamLabel(String value) => value
+      .replaceAll(RegExp(r'\s+'), '')
+      .replaceAll('أ', 'ا')
+      .replaceAll('إ', 'ا')
+      .replaceAll('آ', 'ا')
+      .replaceAll('ى', 'ي')
+      .toLowerCase();
+
+  bool get _isCalculatedExam {
+    final exam = _currentExam;
+    if (exam == null) return false;
+    final label = _normalizeExamLabel(_label(exam));
+    const calculatedLabels = [
+      'معدل النصف الأول',
+      'معدل النصف الثاني',
+      'معدل السعي السنوي',
+      'نتيجة امتحان نهائية',
+      'الدرجة النهائية',
+    ];
+    return calculatedLabels.any((value) => label.contains(_normalizeExamLabel(value))) ||
+        label.contains('finalresult') || label.contains('finalgrade') ||
+        label.contains('firstsemesteraverage') || label.contains('secondsemesteraverage') ||
+        label.contains('annualcourseworkaverage');
   }
 
   void _clearStudents() {
@@ -391,10 +343,6 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
       final result = await _getList(endpoint);
       _clearStudents();
 
-      final detectedIgnored = examId == null
-          ? false
-          : _detectIgnoredStateFromStudents(result, examId!);
-
       final selectedExamIds = _examIdCandidates(examId!);
       for (final student in result) {
         final id = int.tryParse('${student['id']}');
@@ -416,7 +364,6 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
       if (mounted) {
         setState(() {
           students = result;
-          examIgnored = detectedIgnored;
           loadingStudents = false;
         });
       }
@@ -427,75 +374,6 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
           error = '$e';
         });
       }
-    }
-  }
-
-  Future<void> _toggleIgnoreCurrentExam(bool ignore) async {
-    final exam = _currentExam;
-    if (exam == null || students.isEmpty || togglingIgnore) return;
-
-    if (ignore && exam['isIgnorable'] == false) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('هذا الفصل غير قابل للإهمال حسب إعدادات EMIS.'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
-
-    final examNumber = int.tryParse(_id(exam));
-    if (examNumber == null) return;
-
-    final ids = students
-        .map((s) => int.tryParse('${s['id']}'))
-        .whereType<int>()
-        .toSet()
-        .toList();
-    if (ids.isEmpty) return;
-
-    setState(() => togglingIgnore = true);
-    try {
-      final endpoint = ignore
-          ? '/examscore/ignoreexamgrade'
-          : '/examScore/unignoreexamgrade';
-      final response = await http.post(
-        Uri.parse('https://emis.moedu.gov.iq/api$endpoint'),
-        headers: h,
-        body: jsonEncode({
-          'examId': examNumber,
-          'studentIds': ids,
-        }),
-      );
-
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw Exception(
-          'HTTP ${response.statusCode}: ${utf8.decode(response.bodyBytes)}',
-        );
-      }
-
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            ignore
-                ? 'تم إهمال الفصل الدراسي بنجاح.'
-                : 'تم إلغاء إهمال الفصل وتفعيله لإدخال الدرجات.',
-          ),
-          backgroundColor: Colors.green,
-        ),
-      );
-      await _loadStudents();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('تعذر تحديث حالة الفصل: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    } finally {
-      if (mounted) setState(() => togglingIgnore = false);
     }
   }
 
@@ -935,14 +813,9 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
   Future<void> _saveGrades() async {
     final exam = _currentExam;
     if (exam == null) return;
-    if (examIgnored == true) {
+    if (_isCalculatedExam) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'هذا الفصل غير مفعل لأنه مُهمَل ولا يمكن إدخال درجات فيه. اضغط على "إلغاء الإهمال" أولاً.',
-          ),
-          backgroundColor: Colors.orange,
-        ),
+        const SnackBar(content: Text('هذا المعدل يُحتسب في EMIS ولا يمكن إدخال درجته يدويًا.')),
       );
       return;
     }
@@ -1062,6 +935,24 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
             ),
           ),
         ),
+        bottomNavigationBar: SafeArea(
+                minimum: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                child: SizedBox(
+                  height: 54,
+                  child: FilledButton.icon(
+                    onPressed: loading || saving || loadingStudents || students.isEmpty || examId == null || _isCalculatedExam
+                        ? null
+                        : _saveGrades,
+                    icon: saving
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                        : Icon(_isCalculatedExam ? Icons.lock_outline_rounded : Icons.save_rounded),
+                    label: Text(
+                      saving ? 'جاري حفظ الدرجات...' : (_isCalculatedExam ? 'معدل مستورد من EMIS' : 'حفظ الدرجات'),
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+              ),
         body: Stack(
           children: [
             loading
@@ -1069,7 +960,7 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
                 : Directionality(
                     textDirection: TextDirection.rtl,
                     child: ListView(
-                      padding: const EdgeInsets.fromLTRB(16, 18, 16, 28),
+                      padding: const EdgeInsets.fromLTRB(16, 18, 16, 32),
                       children: [
                         _headerCard(),
                         const SizedBox(height: 14),
@@ -1117,29 +1008,6 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
                         ] else if (students.isNotEmpty) ...[
                           const SizedBox(height: 10),
                           ...students.map((student) => _studentCard(student, max, isDark)),
-                          const SizedBox(height: 12),
-                          SizedBox(
-                            height: 54,
-                            child: FilledButton.icon(
-                              onPressed:
-                                  (saving || examIgnored == true) ? null : _saveGrades,
-                              icon: saving
-                                  ? const SizedBox(
-                                      width: 20,
-                                      height: 20,
-                                      child:
-                                          CircularProgressIndicator(strokeWidth: 2),
-                                    )
-                                  : const Icon(Icons.save_rounded),
-                              label: const Text(
-                                'حفظ الدرجات',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ),
                         ],
                       ],
                     ),
@@ -1285,96 +1153,33 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
       );
 
   Widget _examCard(Map<String, dynamic> exam, int max, bool isDark) {
-    final ignored = examIgnored == true;
-    final statusText = loadingStudents
-        ? 'جارٍ التحقق من حالة الإهمال...'
-        : (ignored ? 'غير مفعل — مُهمَل' : 'فعال — غير مُهمَل');
-    final statusColor = loadingStudents
-        ? Colors.orange
-        : (ignored ? Colors.red : Colors.green);
-
+    final calculated = _isCalculatedExam;
     return Card(
       elevation: 0,
       color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Column(
+        child: Row(
           children: [
-            Row(
-              children: [
-                CircleAvatar(
-                  backgroundColor: statusColor.withOpacity(.1),
-                  child: Icon(
-                    ignored ? Icons.visibility_off : Icons.assignment,
-                    color: statusColor,
+            Icon(calculated ? Icons.calculate_rounded : Icons.assignment_rounded,
+                color: calculated ? Colors.teal : const Color(0xFF3949AB), size: 28),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(_label(exam), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isDark ? Colors.white : Colors.black87)),
+                  const SizedBox(height: 4),
+                  Text(
+                    calculated
+                        ? 'معدل محسوب من نظام EMIS — للعرض فقط، تُستورد قيمه من النظام.'
+                        : 'الدرجة القصوى: $max  •  الطلاب: ${students.length}',
+                    style: TextStyle(color: calculated ? Colors.teal : Colors.grey, fontWeight: FontWeight.w600),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        _label(exam),
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                          color: isDark ? Colors.white : Colors.black87,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'الدرجة القصوى: $max  •  الطلاب: ${students.length}',
-                        style: const TextStyle(
-                          color: Colors.grey,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Chip(
-                  backgroundColor: statusColor.withOpacity(.10),
-                  label: Text(
-                    statusText,
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: statusColor,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            if (!loadingStudents && students.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: togglingIgnore
-                      ? null
-                      : () => _toggleIgnoreCurrentExam(!ignored),
-                  icon: togglingIgnore
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : Icon(
-                          ignored
-                              ? Icons.visibility_rounded
-                              : Icons.visibility_off_rounded,
-                          size: 18,
-                        ),
-                  label: Text(
-                    ignored
-                        ? 'إلغاء إهمال الفصل لتفعيل الرصد'
-                        : 'إهمال هذا الفصل',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
+                ],
               ),
-            ],
+            ),
           ],
         ),
       ),
@@ -1383,7 +1188,6 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
 
   Widget _studentCard(Map<String, dynamic> student, int max, bool isDark) {
     final id = int.tryParse('${student['id']}') ?? -1;
-    final ignored = examIgnored == true;
     final name =
         '${student['name'] ?? student['fullName'] ?? student['studentName'] ?? ''}';
     
@@ -1435,7 +1239,7 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
                   onPointerDown: (_) => _markMicPointerDown(),
                   child: IconButton(
                     tooltip: 'إدخال الدرجة بالصوت',
-                    onPressed: () => _toggleVoiceInput(id),
+                    onPressed: _isCalculatedExam ? null : () => _toggleVoiceInput(id),
                     icon: Icon(
                       isThisStudentActiveMic
                           ? Icons.mic_rounded
@@ -1449,7 +1253,7 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
                 SizedBox(
                   width: 86,
                   child: TextField(
-                    enabled: !ignored && !loadingStudents,
+                    enabled: !_isCalculatedExam && !loadingStudents,
                     controller: grades[id],
                     keyboardType: TextInputType.number,
                     inputFormatters: [FilteringTextInputFormatter.digitsOnly],

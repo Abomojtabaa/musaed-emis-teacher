@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'loading_data_screen.dart';
 
 class EmisWebviewScreen extends StatefulWidget {
@@ -47,14 +48,30 @@ class _EmisWebviewScreenState extends State<EmisWebviewScreen> {
             if (mounted) setState(() => _isLoading = false);
           },
         ),
-      )
-      ..loadRequest(Uri.parse('https://emis.moedu.gov.iq'));
+      );
+    _prepareAndLoadEmis();
 
     // عند إعادة فتح التطبيق قد تكون جلسة EMIS موجودة مسبقاً.
     // Pinia قد يحتاج وقتاً لإعادة Hydration، لذلك لا نعتمد على فحص واحد.
     _scanTimer = Timer.periodic(const Duration(milliseconds: 900), (_) {
       if (!_handoffSent) _injectTokenScanner();
     });
+  }
+
+  Future<void> _prepareAndLoadEmis() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final shouldClear = prefs.getBool('clearEmisWebViewStorageOnNextOpen') ?? false;
+      if (shouldClear) {
+        await CookieManager.instance().clearCookies();
+        await _controller.clearCache();
+        await _controller.clearLocalStorage();
+        await prefs.remove('clearEmisWebViewStorageOnNextOpen');
+      }
+    } catch (e) {
+      debugPrint('تعذر تنظيف بيانات WebView قبل تسجيل الدخول: $e');
+    }
+    if (mounted) await _controller.loadRequest(Uri.parse('https://emis.moedu.gov.iq'));
   }
 
   void _handleAuthMessage(String raw) {

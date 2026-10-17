@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'app_core.dart';
 import 'settings_screen.dart';
-import 'grades_screen.dart';
+import 'grade_entry_screen.dart';
 import 'daily_absence_screen.dart';
 
 class DashboardScreen extends StatelessWidget {
@@ -137,18 +137,15 @@ class DashboardScreen extends StatelessWidget {
                           card: card,
                           text: text,
                           title: 'إدخال الدرجات',
-                          subtitle: 'اختيار الصف والمادة والشعبة والفصل وإدخال الدرجات مع دعم الميكروفون والتنقل الصوتي.',
+                          subtitle: 'اختيار الصف والمادة والشعبة والفصل وإدخال الدرجات مباشرة مع دعم الميكروفون والتنقل الصوتي.',
                           icon: Icons.edit_note_rounded,
                           color: const Color(0xFFEF8C24),
                           onTap: () => Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (_) => GradesScreen(
+                              builder: (_) => GradeEntryScreen(
                                 token: token,
                                 schoolId: schoolId,
-                                stages: stages,
-                                subjectsByStage: subjectsByStage,
-                                examsBySubject: examsBySubject,
                                 teachingAssignments: teachingAssignments,
                               ),
                             ),

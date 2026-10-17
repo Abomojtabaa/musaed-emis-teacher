@@ -400,10 +400,29 @@ class _DailyAbsenceScreenState extends State<DailyAbsenceScreen> {
             ),
           ),
         ),
+        bottomNavigationBar: SafeArea(
+                minimum: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                child: SizedBox(
+                  height: 54,
+                  child: FilledButton.icon(
+                    onPressed: loading || saving || loadingStudents || students.isEmpty
+                        ? null
+                        : _saveAbsences,
+                    icon: saving
+                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.cloud_upload_rounded),
+                    label: Text(saving ? 'جاري حفظ الغياب...' : 'حفظ الغياب في EMIS'),
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 15),
+                      backgroundColor: const Color(0xFF1A237E),
+                    ),
+                  ),
+                ),
+              ),
         body: loading
             ? const Center(child: CircularProgressIndicator())
             : ListView(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
                 children: [
                   Container(
                     padding: const EdgeInsets.all(16),
@@ -495,18 +514,7 @@ class _DailyAbsenceScreenState extends State<DailyAbsenceScreen> {
                           ),
                         );
                       }),
-                    const SizedBox(height: 14),
-                    FilledButton.icon(
-                      onPressed: saving ? null : _saveAbsences,
-                      icon: saving
-                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                          : const Icon(Icons.cloud_upload_rounded),
-                      label: Text(saving ? 'جاري حفظ الغياب...' : 'حفظ الغياب في EMIS'),
-                      style: FilledButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 15),
-                        backgroundColor: const Color(0xFF1A237E),
-                      ),
-                    ),
+
                   ],
                 ],
               ),

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 import 'intro_screen.dart';
 import 'app_core.dart';
 import 'google_speech_service.dart';
@@ -43,10 +45,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (confirmed != true || !mounted) return;
 
     try {
-      // لا نعتمد على CookieManager هنا لأن نسخة webview_flutter في المشروع
-      // لا توفر هذا الرمز في سياق البناء الحالي. يتم إنهاء تدفق التطبيق محلياً.
+      // امسح كوكيز الموقع وبيانات الجلسة المخزنة في تفضيلات التطبيق.
+      await CookieManager.instance().clearCookies();
+      final prefs = await SharedPreferences.getInstance();
+      final authKeys = prefs.getKeys().where((key) {
+        final k = key.toLowerCase();
+        return k.contains('token') || k.contains('auth') ||
+            k.contains('session') || k.contains('credential') ||
+            k.contains('emisuser') || k.contains('emis_user');
+      }).toList();
+      for (final key in authKeys) {
+        await prefs.remove(key);
+      }
+      // WebViewController.clearLocalStorage() يُنفذ عند إنشاء WebView
+      // التالي قبل تحميل صفحة EMIS، لضمان عدم إعادة استخدام localStorage القديم.
+      await prefs.setBool('clearEmisWebViewStorageOnNextOpen', true);
     } catch (e) {
-      debugPrint('تعذر مسح بيانات جلسة WebView بالكامل: $e');
+      debugPrint('تعذر مسح بعض بيانات جلسة EMIS: $e');
     }
 
     if (!mounted) return;
