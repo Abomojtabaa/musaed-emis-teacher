@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'intro_screen.dart';
@@ -29,7 +30,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('تسجيل الخروج'),
-        content: const Text('هل تريد تسجيل الخروج من نظام EMIS؟'),
+        content: const Text(
+          'سيتم حذف جلسة EMIS وملفات تعريف الارتباط وبيانات الدخول المحفوظة، ثم فتح صفحة تسجيل الدخول من جديد. هل تريد المتابعة؟',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
@@ -44,121 +47,100 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     if (confirmed != true || !mounted) return;
 
+    final cookieManager = WebViewCookieManager();
     try {
-      // امسح كوكيز الموقع وبيانات الجلسة المخزنة في تفضيلات التطبيق.
-      await WebViewCookieManager().clearCookies();
+      await cookieManager.clearCookies();
+    } catch (e) {
+      debugPrint('تعذر حذف Cookies قبل تسجيل الخروج: $e');
+    }
+
+    // Web storage is origin-scoped. Load the EMIS origin in a temporary WebView,
+    // clear it there, and wait for the JavaScript cleanup to finish.
+    try {
+      final pageLoaded = Completer<void>();
+      final cleanupFinished = Completer<void>();
+      final cleanupController = WebViewController()
+        ..setJavaScriptMode(JavaScriptMode.unrestricted)
+        ..addJavaScriptChannel(
+          'LogoutCleanupChannel',
+          onMessageReceived: (_) {
+            if (!cleanupFinished.isCompleted) cleanupFinished.complete();
+          },
+        )
+        ..setNavigationDelegate(
+          NavigationDelegate(
+            onPageFinished: (_) {
+              if (!pageLoaded.isCompleted) pageLoaded.complete();
+            },
+          ),
+        );
+
+      await cleanupController.loadRequest(
+        Uri.parse('https://emis.moedu.gov.iq/auth/login?logout_cleanup=1'),
+      );
+      await pageLoaded.future.timeout(const Duration(seconds: 15));
+      await cleanupController.runJavaScript(r'''(async function() {
+        try { localStorage.clear(); } catch (_) {}
+        try { sessionStorage.clear(); } catch (_) {}
+        try {
+          if (window.indexedDB && indexedDB.databases) {
+            const dbs = await indexedDB.databases();
+            await Promise.all((dbs || []).map(db => db.name ? new Promise(resolve => {
+              const req = indexedDB.deleteDatabase(db.name);
+              req.onsuccess = req.onerror = req.onblocked = () => resolve();
+            }) : Promise.resolve()));
+          }
+        } catch (_) {}
+        try {
+          if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+            const regs = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(regs.map(reg => reg.unregister()));
+          }
+        } catch (_) {}
+        try {
+          if (window.caches && caches.keys) {
+            const keys = await caches.keys();
+            await Promise.all(keys.map(key => caches.delete(key)));
+          }
+        } catch (_) {}
+        try { LogoutCleanupChannel.postMessage('done'); } catch (_) {}
+      })();''');
+      await cleanupFinished.future.timeout(const Duration(seconds: 10));
+      await cleanupController.clearLocalStorage();
+      await cleanupController.clearCache();
+    } catch (e) {
+      debugPrint('تعذر مسح تخزين موقع EMIS: $e');
+    }
+
+    // Clear cookies again after the cleanup navigation, and remove any auth
+    // tokens a previous version of the app may have stored in preferences.
+    try {
+      await cookieManager.clearCookies();
       final prefs = await SharedPreferences.getInstance();
       final authKeys = prefs.getKeys().where((key) {
         final k = key.toLowerCase();
-        return k.contains('token') || k.contains('auth') ||
-            k.contains('session') || k.contains('credential') ||
-            k.contains('emisuser') || k.contains('emis_user');
+        return k.contains('token') ||
+            k.contains('auth') ||
+            k.contains('session') ||
+            k.contains('credential') ||
+            k.contains('emisuser') ||
+            k.contains('emis_user');
       }).toList();
       for (final key in authKeys) {
         await prefs.remove(key);
       }
-      // WebViewController.clearLocalStorage() يُنفذ عند إنشاء WebView
-      // التالي قبل تحميل صفحة EMIS، لضمان عدم إعادة استخدام localStorage القديم.
-      await prefs.setBool('clearEmisWebViewStorageOnNextOpen', true);
     } catch (e) {
-      debugPrint('تعذر مسح بعض بيانات جلسة EMIS: $e');
+      debugPrint('تعذر حذف بيانات المصادقة المحلية: $e');
     }
 
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const IntroScreen()),
+      MaterialPageRoute(
+        builder: (_) => const EmisWebviewScreen(startAtLogin: true),
+      ),
       (route) => false,
     );
   }
-
-  Future<void> _checkGoogleSpeech() async {
-    try {
-      final info = await GoogleSpeechService.getInfo();
-      final available = info['available'] == true;
-      final googleAvailable = info['googleAvailable'] == true;
-      final provider = '${info['provider'] ?? ''}'.trim();
-      final defaultPackage = '${info['defaultPackage'] ?? ''}'.trim();
-      if (!mounted) return;
-      setState(() {
-        _googleSpeechAvailable = available;
-        _checkingGoogleSpeech = false;
-        if (!available) {
-          _googleSpeechMessage =
-              'لا توجد خدمة تعرف صوتي افتراضية متاحة في Android. افتح إعدادات إدخال الصوت وتأكد من تفعيل خدمة التعرف.';
-        } else if (googleAvailable) {
-          _googleSpeechMessage =
-              'Google متاحة مباشرة. مزود التعرف الحالي: ${provider.isEmpty ? 'Google' : provider}.';
-        } else {
-          _googleSpeechMessage =
-              'تطبيق Google مثبت، لكن Android لا يعرضه كخدمة مستقلة. سيتم استخدام خدمة التعرف الافتراضية${defaultPackage.isEmpty ? '' : ' ($defaultPackage)'}، وقد تكون Google.';
-        }
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _checkingGoogleSpeech = false;
-        _googleSpeechAvailable = false;
-        _googleSpeechMessage = 'تعذر فحص خدمات التعرف الصوتي في Android.';
-      });
-    }
-  }
-
-  Future<void> _setVoiceEngine(String? engine) async {
-    if (engine == null) return;
-    await AppCore.setVoiceRecognitionEngine(engine);
-    if (!mounted) return;
-    setState(() {});
-  }
-
-  Future<void> _setVoiceSetting({
-    bool? autoRestart,
-    int? possibleSilenceMs,
-    int? completeSilenceMs,
-    int? minimumSpeechMs,
-    int? restartDelayMs,
-    int? finalizationTimeoutMs,
-    double? arrowOpacity,
-  }) async {
-    await AppCore.saveVoiceSettings(
-      autoRestart: autoRestart,
-      possibleSilenceMs: possibleSilenceMs,
-      completeSilenceMs: completeSilenceMs,
-      minimumSpeechMs: minimumSpeechMs,
-      restartDelayMs: restartDelayMs,
-      finalizationTimeoutMs: finalizationTimeoutMs,
-      arrowOpacity: arrowOpacity,
-    );
-    if (mounted) setState(() {});
-  }
-
-  Future<void> _resetVoiceSettings() async {
-    await AppCore.resetVoiceSettings();
-    if (!mounted) return;
-    setState(() {});
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('تمت إعادة جميع إعدادات الميكروفون إلى القيم الافتراضية.')),
-    );
-  }
-
-  Future<void> _setVoiceEnabled(bool enabled) async {
-    if (enabled) {
-      final permission = await Permission.microphone.request();
-      if (!permission.isGranted) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('يجب منح التطبيق صلاحية الميكروفون من إعدادات Android أولاً.'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-        return;
-      }
-    }
-
-    await AppCore.setVoiceInputEnabled(enabled);
-    if (mounted) setState(() {});
-  }
-
   Widget _voiceSlider(
     BuildContext context, {
     required String label,

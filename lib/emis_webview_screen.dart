@@ -6,7 +6,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'loading_data_screen.dart';
 
 class EmisWebviewScreen extends StatefulWidget {
-  const EmisWebviewScreen({super.key});
+  final bool startAtLogin;
+
+  const EmisWebviewScreen({super.key, this.startAtLogin = false});
 
   @override
   State<EmisWebviewScreen> createState() => _EmisWebviewScreenState();
@@ -79,7 +81,11 @@ class _EmisWebviewScreenState extends State<EmisWebviewScreen> {
     } catch (e) {
       debugPrint('تعذر تنظيف بيانات WebView قبل تسجيل الدخول: $e');
     }
-    if (mounted) await _controller.loadRequest(Uri.parse('https://emis.moedu.gov.iq'));
+    if (!mounted) return;
+    final startUri = widget.startAtLogin
+        ? Uri.parse('https://emis.moedu.gov.iq/auth/login?logout=1')
+        : Uri.parse('https://emis.moedu.gov.iq');
+    await _controller.loadRequest(startUri);
   }
 
   Future<void> _clearSiteStorageAndReload() async {
@@ -123,7 +129,11 @@ class _EmisWebviewScreenState extends State<EmisWebviewScreen> {
     _handoffSent = false;
     // Reload only after clearing origin storage so an old auth store is not reused.
     await Future<void>.delayed(const Duration(milliseconds: 250));
-    if (mounted) await _controller.loadRequest(Uri.parse('https://emis.moedu.gov.iq'));
+    if (!mounted) return;
+    final startUri = widget.startAtLogin
+        ? Uri.parse('https://emis.moedu.gov.iq/auth/login?logout=1')
+        : Uri.parse('https://emis.moedu.gov.iq');
+    await _controller.loadRequest(startUri);
   }
 
   void _handleAuthMessage(String raw) {
