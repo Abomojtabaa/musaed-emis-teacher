@@ -15,7 +15,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "iq.moedu.emis.emis_app"
+        applicationId = "iq.moedu.emis.teacher"
 
         // تم التعديل هنا إلى 21 لتشغيل مكتبات الصوت والميكروفون بنجاح
         minSdk = 21
