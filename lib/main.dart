@@ -4,14 +4,31 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'intro_screen.dart';
 import 'app_core.dart';
 
-void main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  // تهيئة وحفظ قراءة الإعدادات المحلية (الوضع الداكن والصوت) قبل بدء التطبيق
-  await AppCore.initPreferences();
 
-  SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  // لا ننتظر SharedPreferences قبل runApp؛ إذا تعطل اتصال الإضافة
+  // فلا يبقى التطبيق عالقاً على شاشة الإقلاع الأصلية.
   runApp(const MyApp());
+
+  // تحميل الإعدادات بعد بدء عرض واجهة Flutter. عند نجاح القراءة سيُحدّث
+  // themeNotifier الثيم تلقائياً، وعند الفشل يستمر التطبيق بالقيم الافتراضية.
+  _initializeApp();
+}
+
+Future<void> _initializeApp() async {
+  try {
+    await AppCore.initPreferences().timeout(const Duration(seconds: 5));
+  } catch (error, stackTrace) {
+    debugPrint('تعذر تحميل إعدادات التطبيق المحفوظة: $error');
+    debugPrintStack(stackTrace: stackTrace);
+  }
+
+  try {
+    await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  } catch (error) {
+    debugPrint('تعذر تغيير وضع أشرطة النظام: $error');
+  }
 }
 
 class MyApp extends StatelessWidget {
