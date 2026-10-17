@@ -29,6 +29,10 @@ class _LoadingDataScreenState extends State<LoadingDataScreen> {
   late String _activeToken;
 
   List<Map<String, dynamic>> _stages = [];
+  List<Map<String, dynamic>> _teachingAssignments = [];
+  Set<String> _assignedStageIds = {};
+  Set<String> _assignedSubjectIds = {};
+  Set<String> _assignedRoomIds = {};
   final Map<String, List<Map<String, dynamic>>> _subjectsByStage = {};
   final Map<String, List<Map<String, dynamic>>> _examsBySubject = {};
 
@@ -151,7 +155,7 @@ class _LoadingDataScreenState extends State<LoadingDataScreen> {
   }
 
   String _catalogId(Map<String, dynamic> item) =>
-      '${item['value'] ?? item['id'] ?? item['stageId'] ?? ''}';
+      '${item['value'] ?? item['id'] ?? item['stageId'] ?? item['subjectId'] ?? item['classRoomId'] ?? item['classroomId'] ?? ''}';
 
   Future<void> _loadAcademicCatalog() async {
     setState(() {
@@ -164,9 +168,10 @@ class _LoadingDataScreenState extends State<LoadingDataScreen> {
         'https://emis.moedu.gov.iq/api/selectoption/getschoolstages/${widget.schoolId}',
       ),
     );
-    _stages = _maps(_decode(stagesResponse));
+    final schoolStages = _maps(_decode(stagesResponse));
+    _stages = schoolStages.where((stage) => _assignedStageIds.contains(_catalogId(stage))).toList();
     if (_stages.isEmpty) {
-      throw Exception('لم تُرجع EMIS أي صفوف دراسية للمدرسة');
+      throw Exception('لم تُرجع EMIS صفوفًا تطابق إسنادات هذا المعلم');
     }
 
     setState(() {
@@ -186,7 +191,8 @@ class _LoadingDataScreenState extends State<LoadingDataScreen> {
           'https://emis.moedu.gov.iq/api/subject/getsubjectsselect?stageId=$stageId&schoolId=${widget.schoolId}',
         ),
       );
-      _subjectsByStage[stageId] = _maps(_decode(response));
+      final allowed = _teachingAssignments.where((a) => '${a['stageId']}' == stageId).map((a) => '${a['subjectId']}').toSet();
+      _subjectsByStage[stageId] = _maps(_decode(response)).where((subject) => allowed.contains(_catalogId(subject))).toList();
     });
 
     final subjectKeys = <String>[];
@@ -257,29 +263,38 @@ class _LoadingDataScreenState extends State<LoadingDataScreen> {
         throw Exception('تعذر قراءة بيانات المدرسة من EMIS');
       }
 
+      // Teacher accounts must be scoped to their own assignments. Do not call
+      // the school-wide student or teacher listing endpoints during startup.
+      final employeeId = userData is Map ? userData['employeeId'] : null;
+      if (employeeId == null) {
+        throw Exception('تعذر تحديد رقم المعلم من جلسة EMIS');
+      }
+      setState(() {
+        _statusText = 'جاري تحميل إسنادات المعلم...';
+        _progressValue = .42;
+      });
+      final employeeRes = await _get(Uri.parse(
+        'https://emis.moedu.gov.iq/api/employee/getemployeeinformation/$employeeId',
+      ));
+      final employeeData = _decode(employeeRes);
+      if (employeeData is! Map || employeeData['teachingAssignments'] is! List) {
+        throw Exception('لم تُرجع EMIS إسنادات التدريس لهذا المعلم');
+      }
+      _teachingAssignments = (employeeData['teachingAssignments'] as List)
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .where((a) => a['stageId'] != null && a['subjectId'] != null && a['classRoomId'] != null)
+          .toList();
+      _assignedStageIds = _teachingAssignments.map((a) => '${a['stageId']}').toSet();
+      _assignedSubjectIds = _teachingAssignments.map((a) => '${a['subjectId']}').toSet();
+      _assignedRoomIds = _teachingAssignments.map((a) => '${a['classRoomId']}').toSet();
+      if (_teachingAssignments.isEmpty) {
+        throw Exception('لا توجد شعب ومواد مسندة إلى هذا الحساب في EMIS');
+      }
+
       await _loadAcademicCatalog();
-
-      setState(() {
-        _statusText = 'جاري تحميل سجلات الطلاب...';
-        _progressValue = .68;
-      });
-      final studentsRes = await _get(
-        Uri.parse(
-          'https://emis.moedu.gov.iq/api/student/getstudents?page=1&rowsPerPage=3000&sortBy=id&sortOrder=desc&entityId=${widget.schoolId}',
-        ),
-      );
-      final studentsData = _extractList(_decode(studentsRes), 'الطلاب');
-
-      setState(() {
-        _statusText = 'جاري تحميل سجلات المعلمين...';
-        _progressValue = .88;
-      });
-      final teachersRes = await _get(
-        Uri.parse(
-          'https://emis.moedu.gov.iq/api/employee/getemployeesbyentities?page=1&rowsPerPage=1000&sortBy=id&sortOrder=desc&entityId=${widget.schoolId}&isTeacher=true',
-        ),
-      );
-      final teachersData = _extractList(_decode(teachersRes), 'المعلمين');
+      final studentsData = <dynamic>[];
+      final teachersData = <dynamic>[];
 
       setState(() {
         _statusText = 'اكتملت المزامنة — تجهيز التطبيق...';
@@ -302,6 +317,7 @@ class _LoadingDataScreenState extends State<LoadingDataScreen> {
             stages: _stages,
             subjectsByStage: _subjectsByStage,
             examsBySubject: _examsBySubject,
+            teachingAssignments: _teachingAssignments,
           ),
         ),
       );

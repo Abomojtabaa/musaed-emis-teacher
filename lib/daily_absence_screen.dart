@@ -5,11 +5,13 @@ import 'package:http/http.dart' as http;
 class DailyAbsenceScreen extends StatefulWidget {
   final String token;
   final String schoolId;
+  final List<Map<String, dynamic>> teachingAssignments;
 
   const DailyAbsenceScreen({
     super.key,
     required this.token,
     required this.schoolId,
+    required this.teachingAssignments,
   });
 
   @override
@@ -137,7 +139,7 @@ class _DailyAbsenceScreenState extends State<DailyAbsenceScreen> {
       }
       if (!mounted) return;
       setState(() {
-        stages = loadedStages;
+        stages = loadedStages.where((x) => widget.teachingAssignments.any((a) => '${a['stageId']}' == _id(x))).toList();
         loading = false;
       });
     } catch (e) {
@@ -168,7 +170,7 @@ class _DailyAbsenceScreenState extends State<DailyAbsenceScreen> {
       ));
       if (!mounted) return;
       setState(() {
-        subjects = result;
+        subjects = result.where((x) => widget.teachingAssignments.any((a) => '${a['stageId']}' == stageId && '${a['subjectId']}' == _id(x))).toList();
         loadingStudents = false;
       });
     } catch (e) {
@@ -197,7 +199,7 @@ class _DailyAbsenceScreenState extends State<DailyAbsenceScreen> {
       ));
       if (!mounted) return;
       setState(() {
-        rooms = result;
+        rooms = result.where((x) => widget.teachingAssignments.any((a) => '${a['stageId']}' == stageId && '${a['subjectId']}' == value && '${a['classRoomId']}' == _id(x))).toList();
         loadingStudents = false;
         if (result.length == 1) {
           roomId = _id(result.first);

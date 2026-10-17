@@ -14,6 +14,7 @@ class DashboardScreen extends StatelessWidget {
   final List<Map<String, dynamic>> stages;
   final Map<String, List<Map<String, dynamic>>> subjectsByStage;
   final Map<String, List<Map<String, dynamic>>> examsBySubject;
+  final List<Map<String, dynamic>> teachingAssignments;
 
   const DashboardScreen({
     super.key,
@@ -26,6 +27,7 @@ class DashboardScreen extends StatelessWidget {
     required this.stages,
     required this.subjectsByStage,
     required this.examsBySubject,
+    required this.teachingAssignments,
   });
 
   @override
@@ -147,6 +149,7 @@ class DashboardScreen extends StatelessWidget {
                                 stages: stages,
                                 subjectsByStage: subjectsByStage,
                                 examsBySubject: examsBySubject,
+                                teachingAssignments: teachingAssignments,
                               ),
                             ),
                           ),
@@ -163,7 +166,7 @@ class DashboardScreen extends StatelessWidget {
                           onTap: () => Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (_) => DailyAbsenceScreen(token: token, schoolId: schoolId),
+                              builder: (_) => DailyAbsenceScreen(token: token, schoolId: schoolId, teachingAssignments: teachingAssignments),
                             ),
                           ),
                         ),

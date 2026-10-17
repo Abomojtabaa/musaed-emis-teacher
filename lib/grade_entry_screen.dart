@@ -13,10 +13,12 @@ import 'package:speech_to_text/speech_recognition_error.dart';
 class GradeEntryScreen extends StatefulWidget {
   final String token;
   final String schoolId;
+  final List<Map<String, dynamic>> teachingAssignments;
   const GradeEntryScreen({
     super.key,
     required this.token,
     required this.schoolId,
+    required this.teachingAssignments,
   });
 
   @override
@@ -156,7 +158,7 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
           await _getList('/selectoption/getschoolstages/${widget.schoolId}');
       if (!mounted) return;
       setState(() {
-        stages = result;
+        stages = result.where((x) => widget.teachingAssignments.any((a) => '${a['stageId']}' == _id(x))).toList();
         loading = false;
         error = null;
       });
@@ -188,7 +190,7 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
       final result = await _getList(
         '/subject/getsubjectsselect?stageId=$value&schoolId=${widget.schoolId}',
       );
-      if (mounted) setState(() => subjects = result);
+      if (mounted) setState(() => subjects = result.where((x) => widget.teachingAssignments.any((a) => '${a['stageId']}' == stageId && '${a['subjectId']}' == _id(x))).toList());
     } catch (e) {
       if (mounted) setState(() => error = '$e');
     }
@@ -218,7 +220,7 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
       final examResult = _maps(rawExams);
       if (!mounted) return;
       setState(() {
-        rooms = roomResult;
+        rooms = roomResult.where((x) => widget.teachingAssignments.any((a) => '${a['stageId']}' == stageId && '${a['subjectId']}' == value && '${a['classRoomId']}' == _id(x))).toList();
         exams = examResult;
       });
     } catch (e) {

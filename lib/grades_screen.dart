@@ -8,6 +8,7 @@ class GradesScreen extends StatelessWidget {
   final List<Map<String, dynamic>> stages;
   final Map<String, List<Map<String, dynamic>>> subjectsByStage;
   final Map<String, List<Map<String, dynamic>>> examsBySubject;
+  final List<Map<String, dynamic>> teachingAssignments;
 
   const GradesScreen({
     super.key,
@@ -16,6 +17,7 @@ class GradesScreen extends StatelessWidget {
     required this.stages,
     required this.subjectsByStage,
     required this.examsBySubject,
+    required this.teachingAssignments,
   });
 
   @override
@@ -83,7 +85,7 @@ class GradesScreen extends StatelessWidget {
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => GradeEntryScreen(token: token, schoolId: schoolId),
+                        builder: (_) => GradeEntryScreen(token: token, schoolId: schoolId, teachingAssignments: teachingAssignments),
                       ),
                     ),
                     borderRadius: BorderRadius.circular(21),
