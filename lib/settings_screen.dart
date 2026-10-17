@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:webview_flutter/webview_flutter.dart';
+import 'intro_screen.dart';
 import 'app_core.dart';
 import 'google_speech_service.dart';
 
@@ -19,6 +21,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     _checkGoogleSpeech();
+  }
+
+  Future<void> _logout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('تسجيل الخروج'),
+        content: const Text('هل تريد تسجيل الخروج من نظام EMIS؟'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('تسجيل الخروج'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await CookieManager.instance().clearCookies();
+      await WebStorageManager.instance().clearData();
+    } catch (e) {
+      debugPrint('تعذر مسح بيانات جلسة WebView بالكامل: $e');
+    }
+
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const IntroScreen()),
+      (route) => false,
+    );
   }
 
   Future<void> _checkGoogleSpeech() async {
@@ -170,6 +206,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
           body: ListView(
             padding: const EdgeInsets.all(20),
             children: [
+              Card(
+                color: cardColor,
+                elevation: 2,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                child: ListTile(
+                  leading: const Icon(Icons.logout_rounded, color: Colors.red, size: 30),
+                  title: Text(
+                    'تسجيل الخروج من EMIS',
+                    style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                  subtitle: const Text('إنهاء الجلسة والعودة إلى شاشة تسجيل الدخول'),
+                  trailing: const Icon(Icons.chevron_left_rounded),
+                  onTap: _logout,
+                ),
+              ),
+              const SizedBox(height: 15),
               Card(
                 color: cardColor,
                 elevation: 2,
