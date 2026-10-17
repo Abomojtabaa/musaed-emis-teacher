@@ -19,23 +19,21 @@ dependencies:
   http: ^1.1.0
   webview_flutter: ^4.4.2
 
-  # الكاميرا والمعرض
+  # Camera and gallery
   image_picker: ^1.0.7
 
-  # صلاحيات الكاميرا والملفات وغيرها
+  # Speech recognition and permissions
   speech_to_text: ^7.4.0
   permission_handler: ^11.3.0
 
-  # التخزين المحلي
+  # Local storage
   shared_preferences: ^2.2.2
 
-  # معالجة الصور
+  # Image processing
   image: ^4.10.1
 
-  # إزالة خلفية الشخص محليًا
+  # Local person background removal
   google_mlkit_selfie_segmentation: 0.12.1
-
-  # التعرف الصوتي الأساسي عبر Android SpeechRecognizer، مع مسار speech_to_text احتياطي.
 
 dev_dependencies:
   flutter_test:
@@ -47,5 +45,4 @@ flutter:
   uses-material-design: true
 
   assets:
-    - assets/avatar.jpg
     - assets/avatar.png
