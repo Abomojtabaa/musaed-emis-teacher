@@ -44,8 +44,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (confirmed != true || !mounted) return;
 
     try {
+      // webview_flutter 4.x does not expose a WebStorageManager API on all
+      // supported versions. Clear cookies using the supported CookieManager API.
       await CookieManager.instance().clearCookies();
-      await WebStorageManager.instance().clearData();
     } catch (e) {
       debugPrint('تعذر مسح بيانات جلسة WebView بالكامل: $e');
     }
