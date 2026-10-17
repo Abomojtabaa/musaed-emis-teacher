@@ -1,0 +1,126 @@
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+class AppCore {
+  static ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.light);
+  static bool voiceInputEnabled = true;
+  // التشغيل التلقائي للتنقل الصوتي بين الحقول في نموذج إضافة الطالب.
+  static bool voiceSequentialAutoStart = false;
+  /// google = Android SpeechRecognizer (يفضل خدمة Google/الخدمة الافتراضية)،
+  /// legacy = مسار speech_to_text القديم الذي كان يعمل سابقاً.
+  static String voiceRecognitionEngine = 'google';
+
+  // إعدادات التعرف الصوتي في Android/Google.
+  static bool voiceAutoRestart = false;
+  static int voicePossibleSilenceMs = 23000;
+  static int voiceCompleteSilenceMs = 23000;
+  static int voiceMinimumSpeechMs = 2500;
+  static int voiceRestartDelayMs = 4100;
+  static int voiceFinalizationTimeoutMs = 2400;
+  static double voiceArrowOpacity = 0.25;
+
+  static Future<void> initPreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    bool isDark = prefs.getBool('isDark') ?? false;
+    themeNotifier.value = isDark ? ThemeMode.dark : ThemeMode.light;
+
+    voiceInputEnabled = prefs.getBool('voiceInputEnabled') ?? true;
+    voiceSequentialAutoStart = prefs.getBool('voiceSequentialAutoStart') ?? false;
+    voiceRecognitionEngine = prefs.getString('voiceRecognitionEngine') ?? 'google';
+    voiceAutoRestart = prefs.getBool('voiceAutoRestart') ?? false;
+    voicePossibleSilenceMs = prefs.getInt('voicePossibleSilenceMs') ?? 23000;
+    voiceCompleteSilenceMs = prefs.getInt('voiceCompleteSilenceMs') ?? 23000;
+    voiceMinimumSpeechMs = prefs.getInt('voiceMinimumSpeechMs') ?? 2500;
+    voiceRestartDelayMs = prefs.getInt('voiceRestartDelayMs') ?? 4100;
+    voiceFinalizationTimeoutMs = prefs.getInt('voiceFinalizationTimeoutMs') ?? 2400;
+    voiceArrowOpacity = prefs.getDouble('voiceArrowOpacity') ?? 0.25;
+    voiceArrowOpacity = voiceArrowOpacity.clamp(0.20, 0.90);
+  }
+
+  static Future<void> saveThemePreference(bool isDark) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('isDark', isDark);
+    themeNotifier.value = isDark ? ThemeMode.dark : ThemeMode.light;
+  }
+
+  static Future<void> setVoiceInputEnabled(bool enabled) async {
+    voiceInputEnabled = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('voiceInputEnabled', enabled);
+  }
+
+  static Future<void> setVoiceSequentialAutoStart(bool enabled) async {
+    voiceSequentialAutoStart = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('voiceSequentialAutoStart', enabled);
+  }
+
+  static Future<void> setVoiceRecognitionEngine(String engine) async {
+    final value = engine == 'legacy' ? 'legacy' : 'google';
+    voiceRecognitionEngine = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('voiceRecognitionEngine', value);
+  }
+
+  static Future<void> saveVoiceSettings({
+    bool? autoRestart,
+    int? possibleSilenceMs,
+    int? completeSilenceMs,
+    int? minimumSpeechMs,
+    int? restartDelayMs,
+    int? finalizationTimeoutMs,
+    double? arrowOpacity,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (autoRestart != null) {
+      voiceAutoRestart = autoRestart;
+      await prefs.setBool('voiceAutoRestart', autoRestart);
+    }
+    if (possibleSilenceMs != null) {
+      voicePossibleSilenceMs = possibleSilenceMs;
+      await prefs.setInt('voicePossibleSilenceMs', possibleSilenceMs);
+    }
+    if (completeSilenceMs != null) {
+      voiceCompleteSilenceMs = completeSilenceMs;
+      await prefs.setInt('voiceCompleteSilenceMs', completeSilenceMs);
+    }
+    if (minimumSpeechMs != null) {
+      voiceMinimumSpeechMs = minimumSpeechMs;
+      await prefs.setInt('voiceMinimumSpeechMs', minimumSpeechMs);
+    }
+    if (restartDelayMs != null) {
+      voiceRestartDelayMs = restartDelayMs;
+      await prefs.setInt('voiceRestartDelayMs', restartDelayMs);
+    }
+    if (finalizationTimeoutMs != null) {
+      voiceFinalizationTimeoutMs = finalizationTimeoutMs;
+      await prefs.setInt('voiceFinalizationTimeoutMs', finalizationTimeoutMs);
+    }
+    if (arrowOpacity != null) {
+      voiceArrowOpacity = arrowOpacity.clamp(0.20, 0.90);
+      await prefs.setDouble('voiceArrowOpacity', voiceArrowOpacity);
+    }
+  }
+
+  static Future<void> resetVoiceSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    voiceAutoRestart = false;
+    voicePossibleSilenceMs = 23000;
+    voiceCompleteSilenceMs = 23000;
+    voiceMinimumSpeechMs = 2500;
+    voiceRestartDelayMs = 4100;
+    voiceFinalizationTimeoutMs = 2400;
+    voiceArrowOpacity = 0.25;
+    for (final key in [
+      'voiceAutoRestart', 'voicePossibleSilenceMs', 'voiceCompleteSilenceMs',
+      'voiceMinimumSpeechMs', 'voiceRestartDelayMs', 'voiceFinalizationTimeoutMs',
+      'voiceArrowOpacity',
+    ]) {
+      await prefs.remove(key);
+    }
+  }
+  static void toggleTheme() {
+    bool isDark = themeNotifier.value == ThemeMode.dark;
+    saveThemePreference(!isDark);
+  }
+}
