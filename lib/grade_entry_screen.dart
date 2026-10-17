@@ -34,6 +34,9 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
 
   String? stageId, subjectId, roomId, examId;
   final Map<int, TextEditingController> grades = {};
+  // Last values known to be stored by EMIS; used to distinguish an intentional
+  // deletion from a field that was simply left empty.
+  final Map<int, String> _originalGrades = {};
   final Map<int, GlobalKey> _voiceFieldKeys = {};
 
   bool loading = true;
@@ -271,8 +274,9 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
       for (final item in rawGrades) {
         if (item is! Map) continue;
         final gradeMap = Map<dynamic, dynamic>.from(item);
-        final rawExamId =
-            gradeMap['examId'] ?? gradeMap['exam_id'] ?? gradeMap['id'];
+        final rawExamId = gradeMap['examId'] ??
+            gradeMap['exam_id'] ?? gradeMap['examID'] ??
+            gradeMap['exam'] ?? gradeMap['markId'] ?? gradeMap['id'];
         if (rawExamId != null && selectedExamIds.contains('$rawExamId'.trim())) {
           return gradeMap;
         }
@@ -307,6 +311,12 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
   bool get _isCalculatedExam {
     final exam = _currentExam;
     if (exam == null) return false;
+    // EMIS marks calculated exam rows explicitly (AVERAGE / MAX with dependsOn).
+    // Trust that metadata rather than relying only on localized display labels.
+    final calculation = exam['type'];
+    if (calculation is Map && '${calculation['operation'] ?? ''}'.trim().isNotEmpty) {
+      return true;
+    }
     final label = _normalizeExamLabel(_label(exam));
     const calculatedLabels = [
       'معدل النصف الأول',
@@ -326,6 +336,7 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
       c.dispose();
     }
     grades.clear();
+    _originalGrades.clear();
   }
 
   Future<void> _loadStudents() async {
@@ -352,13 +363,12 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
         final existing = _findStudentGradeForExam(student, selectedExamIds);
         final existingValue = existing == null
             ? null
-            : (existing['grade'] ??
-                existing['score'] ??
-                existing['mark'] ??
-                existing['value']);
-        grades[id] = TextEditingController(
-          text: existingValue == null ? '' : '$existingValue',
-        );
+            : (existing['grade'] ?? existing['score'] ??
+                existing['mark'] ?? existing['markScore'] ??
+                existing['scoreValue'] ?? existing['value']);
+        final initialText = existingValue == null ? '' : '$existingValue';
+        _originalGrades[id] = initialText;
+        grades[id] = TextEditingController(text: initialText);
       }
 
       if (mounted) {
@@ -797,7 +807,7 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
   Future<http.Response> _postGrade(
     int studentId,
     int examNumber,
-    int grade,
+    int? grade,
   ) async {
     return http.post(
       Uri.parse('https://emis.moedu.gov.iq/api/examscore/updateexamgrade'),
@@ -832,31 +842,41 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
     }
 
     setState(() => saving = true);
-    int ok = 0, failed = 0;
+    int ok = 0, failed = 0, unchanged = 0;
     final failures = <String>[];
     try {
       for (final student in students) {
         final studentId = int.tryParse('${student['id']}');
         if (studentId == null) continue;
         final raw = grades[studentId]?.text.trim() ?? '';
-        if (raw.isEmpty) continue;
-        final parsed = int.tryParse(_normalizeNumber(raw));
-        final max =
-            int.tryParse('${exam['maxAllowedGrade'] ?? exam['max'] ?? 100}') ??
-                100;
-        if (parsed == null || parsed < 0 || parsed > max) {
-          failed++;
-          failures.add(
-            'الطالب $studentId: الدرجة "$raw" غير صالحة؛ المجال 0-$max',
-          );
+        final original = (_originalGrades[studentId] ?? '').trim();
+
+        // Do not resend untouched values. An empty field is a deletion only
+        // when EMIS previously returned a non-empty value for this student.
+        if (raw == original) {
+          unchanged++;
           continue;
         }
+        if (raw.isEmpty && original.isEmpty) {
+          unchanged++;
+          continue;
+        }
+
+        int? parsed;
+        if (raw.isNotEmpty) {
+          parsed = int.tryParse(_normalizeNumber(raw));
+          final max = int.tryParse('${exam['maxAllowedGrade'] ?? exam['max'] ?? 100}') ?? 100;
+          if (parsed == null || parsed < 0 || parsed > max) {
+            failed++;
+            failures.add('الطالب $studentId: الدرجة "$raw" غير صالحة؛ المجال 0-$max');
+            continue;
+          }
+        }
+
         try {
           var response = await _postGrade(studentId, examNumber, parsed);
           var body = utf8.decode(response.bodyBytes).trim();
-
-          if (response.statusCode == 400 &&
-              body.toLowerCase().contains('exam not found')) {
+          if (response.statusCode == 400 && body.toLowerCase().contains('exam not found')) {
             final alternatives = <int>{};
             for (final k in const ['examId', 'id', 'value']) {
               final n = int.tryParse('${exam[k] ?? ''}');
@@ -866,19 +886,17 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
               if (alt == examNumber) continue;
               response = await _postGrade(studentId, alt, parsed);
               body = utf8.decode(response.bodyBytes).trim();
-              if (response.statusCode >= 200 && response.statusCode < 300) {
-                break;
-              }
+              if (response.statusCode >= 200 && response.statusCode < 300) break;
             }
           }
-
           if (response.statusCode >= 200 && response.statusCode < 300) {
             ok++;
+            // Keep the edited value visible after save and mark it as the
+            // latest value submitted, instead of clearing every TextField.
+            _originalGrades[studentId] = raw;
           } else {
             failed++;
-            failures.add(
-              'الطالب $studentId: HTTP ${response.statusCode}${body.isEmpty ? '' : ' — $body'}',
-            );
+            failures.add('الطالب $studentId: HTTP ${response.statusCode}${body.isEmpty ? '' : ' — $body'}');
           }
         } catch (e) {
           failed++;
@@ -886,23 +904,51 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
         }
       }
       if (!mounted) return;
-      for (final controller in grades.values) {
-        controller.clear();
-      }
       setState(() => saving = false);
-      final details =
-          failures.isEmpty ? '' : '\n${failures.take(2).join('\n')}';
+      final details = failures.isEmpty ? '' : '\n${failures.take(3).join('\n')}';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            'تم حفظ $ok درجة${failed == 0 ? '' : ' — فشل $failed'}$details',
-          ),
+          content: Text('تم إرسال $ok تغيير${failed == 0 ? '' : ' — فشل $failed'}${ok == 0 && unchanged > 0 ? ' — لا توجد تغييرات جديدة' : ''}$details'),
           backgroundColor: failed == 0 ? Colors.green : Colors.orange,
-          duration: const Duration(seconds: 7),
+          duration: const Duration(seconds: 8),
         ),
       );
+      // Refresh server-side values so calculated averages supplied by EMIS are
+      // read from its response after the source grades have been saved.
+      if (ok > 0 && mounted) {
+        await _refreshGradesFromEmis();
+      }
     } finally {
       if (mounted) setState(() => saving = false);
+    }
+  }
+
+  Future<void> _refreshGradesFromEmis() async {
+    if (stageId == null || subjectId == null || examId == null) return;
+    try {
+      var endpoint = '/examscore/getstudentswithgrades?schoolId=${widget.schoolId}&stageId=$stageId&subjectId=$subjectId';
+      if (roomId != null && roomId!.isNotEmpty) endpoint += '&classroomId=$roomId';
+      final result = await _getList(endpoint);
+      final selectedExamIds = _examIdCandidates(examId!);
+      if (!mounted) return;
+      setState(() {
+        for (final student in result) {
+          final id = int.tryParse('${student['id']}');
+          if (id == null || !grades.containsKey(id)) continue;
+          final existing = _findStudentGradeForExam(student, selectedExamIds);
+          final value = existing == null ? null : (existing['grade'] ?? existing['score'] ?? existing['mark'] ?? existing['markScore'] ?? existing['scoreValue'] ?? existing['value']);
+          // If server omits an empty/deleted grade, reflect that. Otherwise
+          // update with the authoritative value, including calculated exams.
+          if (value != null) {
+            grades[id]!.text = '$value';
+            _originalGrades[id] = '$value';
+          } else if ((_originalGrades[id] ?? '').isEmpty) {
+            grades[id]!.text = '';
+          }
+        }
+      });
+    } catch (_) {
+      // Keep the values already shown if a post-save refresh temporarily fails.
     }
   }
 
