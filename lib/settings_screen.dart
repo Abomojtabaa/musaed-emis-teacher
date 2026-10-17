@@ -46,7 +46,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     try {
       // امسح كوكيز الموقع وبيانات الجلسة المخزنة في تفضيلات التطبيق.
-      await CookieManager.instance().clearCookies();
+      await WebViewCookieManager().clearCookies();
       final prefs = await SharedPreferences.getInstance();
       final authKeys = prefs.getKeys().where((key) {
         final k = key.toLowerCase();

@@ -63,7 +63,7 @@ class _EmisWebviewScreenState extends State<EmisWebviewScreen> {
       final prefs = await SharedPreferences.getInstance();
       final shouldClear = prefs.getBool('clearEmisWebViewStorageOnNextOpen') ?? false;
       if (shouldClear) {
-        await CookieManager.instance().clearCookies();
+        await WebViewCookieManager().clearCookies();
         await _controller.clearCache();
         await _controller.clearLocalStorage();
         await prefs.remove('clearEmisWebViewStorageOnNextOpen');
