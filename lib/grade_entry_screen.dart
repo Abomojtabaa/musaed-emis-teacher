@@ -1299,7 +1299,8 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
                 SizedBox(
                   width: 86,
                   child: TextField(
-                    enabled: !_isCalculatedExam && !loadingStudents,
+                    enabled: !loadingStudents,
+                    readOnly: _isCalculatedExam,
                     controller: grades[id],
                     keyboardType: TextInputType.number,
                     inputFormatters: [FilteringTextInputFormatter.digitsOnly],

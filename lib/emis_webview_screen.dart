@@ -17,6 +17,9 @@ class _EmisWebviewScreenState extends State<EmisWebviewScreen> {
   Timer? _scanTimer;
   bool _isLoading = true;
   bool _handoffSent = false;
+  bool _storageClearPending = false;
+  bool _storageClearStarted = false;
+  bool _authScanningEnabled = false;
 
   @override
   void initState() {
@@ -39,10 +42,15 @@ class _EmisWebviewScreenState extends State<EmisWebviewScreen> {
           },
           onPageFinished: (String url) {
             if (mounted) setState(() => _isLoading = false);
-            _injectTokenScanner();
+            if (_storageClearPending) {
+              unawaited(_clearSiteStorageAndReload());
+            } else {
+              _authScanningEnabled = true;
+              _injectTokenScanner();
+            }
           },
           onUrlChange: (UrlChange change) {
-            _injectTokenScanner();
+            if (!_storageClearPending) _injectTokenScanner();
           },
           onWebResourceError: (WebResourceError error) {
             if (mounted) setState(() => _isLoading = false);
@@ -61,16 +69,60 @@ class _EmisWebviewScreenState extends State<EmisWebviewScreen> {
   Future<void> _prepareAndLoadEmis() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final shouldClear = prefs.getBool('clearEmisWebViewStorageOnNextOpen') ?? false;
-      if (shouldClear) {
+      _storageClearPending = prefs.getBool('clearEmisWebViewStorageOnNextOpen') ?? false;
+      if (_storageClearPending) {
+        // Cookies must be removed before the first request to EMIS. Local
+        // storage is origin-scoped, so it is cleared only after the origin loads.
         await WebViewCookieManager().clearCookies();
         await _controller.clearCache();
-        await _controller.clearLocalStorage();
-        await prefs.remove('clearEmisWebViewStorageOnNextOpen');
       }
     } catch (e) {
       debugPrint('تعذر تنظيف بيانات WebView قبل تسجيل الدخول: $e');
     }
+    if (mounted) await _controller.loadRequest(Uri.parse('https://emis.moedu.gov.iq'));
+  }
+
+  Future<void> _clearSiteStorageAndReload() async {
+    if (_storageClearStarted || !_storageClearPending || !mounted) return;
+    _storageClearStarted = true;
+    try {
+      // Execute on the EMIS origin; localStorage cannot be cleared on about:blank.
+      await _controller.runJavaScriptReturningResult(r'''(async function() {
+        try { localStorage.clear(); } catch (_) {}
+        try { sessionStorage.clear(); } catch (_) {}
+        try {
+          if (window.indexedDB && indexedDB.databases) {
+            const dbs = await indexedDB.databases();
+            await Promise.all((dbs || []).map(db => db.name ? new Promise(resolve => {
+              const req = indexedDB.deleteDatabase(db.name);
+              req.onsuccess = req.onerror = req.onblocked = () => resolve();
+            }) : Promise.resolve()));
+          }
+        } catch (_) {}
+        try {
+          if (window.caches) {
+            const keys = await caches.keys();
+            await Promise.all(keys.map(key => caches.delete(key)));
+          }
+        } catch (_) {}
+        try {
+          if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+            const regs = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(regs.map(reg => reg.unregister()));
+          }
+        } catch (_) {}
+        return 'cleared';
+      })()''');
+      await _controller.clearLocalStorage();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('clearEmisWebViewStorageOnNextOpen');
+    } catch (e) {
+      debugPrint('تعذر مسح التخزين المحلي لموقع EMIS: $e');
+    }
+    _storageClearPending = false;
+    _handoffSent = false;
+    // Reload only after clearing origin storage so an old auth store is not reused.
+    await Future<void>.delayed(const Duration(milliseconds: 250));
     if (mounted) await _controller.loadRequest(Uri.parse('https://emis.moedu.gov.iq'));
   }
 
@@ -106,6 +158,7 @@ class _EmisWebviewScreenState extends State<EmisWebviewScreen> {
   }
 
   void _injectTokenScanner() {
+    if (!_authScanningEnabled || _storageClearPending) return;
     const String jsCode = r'''
       (function() {
         function cleanBearer(value) {
