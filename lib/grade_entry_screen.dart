@@ -10,6 +10,24 @@ import 'google_speech_service.dart';
 import 'legacy_speech_service.dart';
 import 'package:speech_to_text/speech_recognition_error.dart';
 
+/// Allows a numeric grade, or one of the two EMIS special marks: م / غ.
+/// Special marks are accepted alone; mixing them with digits is rejected.
+class GradeValueInputFormatter extends TextInputFormatter {
+  const GradeValueInputFormatter();
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final value = newValue.text;
+    if (value.isEmpty || RegExp(r'^\d+$').hasMatch(value) || value == 'م' || value == 'غ') {
+      return newValue;
+    }
+    return oldValue;
+  }
+}
+
 class GradeEntryScreen extends StatefulWidget {
   final String token;
   final String schoolId;
@@ -31,6 +49,8 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
   List<Map<String, dynamic>> rooms = [];
   List<Map<String, dynamic>> exams = [];
   List<Map<String, dynamic>> students = [];
+  bool _sortStudentsAlphabetically = true;
+  final Map<String, int> _studentApiOrder = {};
 
   String? stageId, subjectId, roomId, examId;
   final Map<int, TextEditingController> grades = {};
@@ -423,6 +443,67 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
     _originalGrades.clear();
   }
 
+  String _studentName(Map<String, dynamic> student) =>
+      '${student['name'] ?? student['studentName'] ?? student['fullName'] ?? student['displayName'] ?? 'طالب'}'.trim();
+
+  String _alphabeticalKey(String value) {
+    var key = value.trim().toLowerCase();
+    // Normalize common Arabic letter variants so names sort more naturally.
+    const replacements = {
+      'أ': 'ا', 'إ': 'ا', 'آ': 'ا', 'ٱ': 'ا',
+      'ى': 'ي', 'ؤ': 'و', 'ئ': 'ي',
+    };
+    replacements.forEach((from, to) => key = key.replaceAll(from, to));
+    key = key.replaceAll(RegExp(r'[ًٌٍَُِّْـ]'), '');
+    return key;
+  }
+
+  String _studentIdentity(Map<String, dynamic> student) =>
+      '${student['id'] ?? student['studentId'] ?? ''}';
+
+  void _rememberStudentOrder(List<Map<String, dynamic>> roster) {
+    _studentApiOrder.clear();
+    for (var i = 0; i < roster.length; i++) {
+      _studentApiOrder[_studentIdentity(roster[i])] = i;
+    }
+  }
+
+  void _applyStudentSorting() {
+    if (_sortStudentsAlphabetically) {
+      students.sort((a, b) => _alphabeticalKey(_studentName(a))
+          .compareTo(_alphabeticalKey(_studentName(b))));
+    } else {
+      students.sort((a, b) =>
+          (_studentApiOrder[_studentIdentity(a)] ?? 0)
+              .compareTo(_studentApiOrder[_studentIdentity(b)] ?? 0));
+    }
+  }
+
+  void _setAlphabeticalSorting(bool enabled) {
+    setState(() {
+      _sortStudentsAlphabetically = enabled;
+      _applyStudentSorting();
+    });
+  }
+
+  Widget _studentSortingControl(bool isDark) => Container(
+        margin: const EdgeInsets.only(top: 12, bottom: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF242424) : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: SwitchListTile.adaptive(
+          contentPadding: EdgeInsets.zero,
+          value: _sortStudentsAlphabetically,
+          onChanged: _setAlphabeticalSorting,
+          title: const Text('ترتيب أسماء الطلاب أبجديًا',
+              style: TextStyle(fontWeight: FontWeight.w600)),
+          subtitle: const Text('يبدأ الترتيب مفعّلًا افتراضيًا'),
+          secondary: const Icon(Icons.sort_by_alpha_rounded),
+        ),
+      );
+
   Future<void> _loadStudents() async {
     if (stageId == null || subjectId == null || examId == null) return;
     setState(() {
@@ -451,6 +532,8 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
       if (mounted) {
         setState(() {
           students = result;
+          _rememberStudentOrder(result);
+          _applyStudentSorting();
           loadingStudents = false;
         });
       }
@@ -889,7 +972,7 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
   Future<http.Response> _postGrade(
     int studentId,
     int examNumber,
-    int? grade,
+    dynamic grade,
   ) async {
     return http.post(
       Uri.parse('https://emis.moedu.gov.iq/api/examscore/updateexamgrade'),
@@ -944,14 +1027,21 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
           continue;
         }
 
-        int? parsed;
+        dynamic parsed;
         if (raw.isNotEmpty) {
-          parsed = int.tryParse(_normalizeNumber(raw));
-          final max = int.tryParse('${exam['maxAllowedGrade'] ?? exam['max'] ?? 100}') ?? 100;
-          if (parsed == null || parsed < 0 || parsed > max) {
-            failed++;
-            failures.add('الطالب $studentId: الدرجة "$raw" غير صالحة؛ المجال 0-$max');
-            continue;
+          final special = raw.trim();
+          if (special == 'م' || special == 'غ') {
+            // EMIS special exam marks: م = deferred, غ = absent.
+            parsed = special;
+          } else {
+            final numeric = int.tryParse(_normalizeNumber(raw));
+            final max = int.tryParse('${exam['maxAllowedGrade'] ?? exam['max'] ?? 100}') ?? 100;
+            if (numeric == null || numeric < 0 || numeric > max) {
+              failed++;
+              failures.add('الطالب $studentId: الدرجة "$raw" غير صالحة؛ أدخل رقمًا من 0 إلى $max أو م أو غ');
+              continue;
+            }
+            parsed = numeric;
           }
         }
 
@@ -1014,6 +1104,8 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
       if (!mounted) return;
       setState(() {
         students = result;
+        _rememberStudentOrder(result);
+        _applyStudentSorting();
         for (final student in result) {
           final id = int.tryParse('${student['id']}');
           if (id == null || !grades.containsKey(id)) continue;
@@ -1134,6 +1226,15 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
                           const Center(child: CircularProgressIndicator()),
                         ] else if (students.isNotEmpty) ...[
                           const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text('الطلاب (${students.length})',
+                                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                              ),
+                            ],
+                          ),
+                          _studentSortingControl(isDark),
                           ...students.map((student) => _studentCard(student, max, isDark)),
                         ],
                       ],
@@ -1384,7 +1485,7 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
                     readOnly: _isCalculatedExam,
                     controller: grades[id],
                     keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    inputFormatters: [const GradeValueInputFormatter()],
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontWeight: FontWeight.bold,

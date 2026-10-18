@@ -23,6 +23,8 @@ class _DailyAbsenceScreenState extends State<DailyAbsenceScreen> {
   List<Map<String, dynamic>> subjects = [];
   List<Map<String, dynamic>> rooms = [];
   List<Map<String, dynamic>> students = [];
+  bool _sortStudentsAlphabetically = true;
+  final Map<String, int> _studentApiOrder = {};
 
   String? stageId;
   String? subjectId;
@@ -227,6 +229,65 @@ class _DailyAbsenceScreenState extends State<DailyAbsenceScreen> {
     await _loadStudents();
   }
 
+  String _studentName(Map<String, dynamic> student) =>
+      '${student['name'] ?? student['studentName'] ?? student['fullName'] ?? student['displayName'] ?? 'طالب'}'.trim();
+
+  String _alphabeticalKey(String value) {
+    var key = value.trim().toLowerCase();
+    const replacements = {
+      'أ': 'ا', 'إ': 'ا', 'آ': 'ا', 'ٱ': 'ا',
+      'ى': 'ي', 'ؤ': 'و', 'ئ': 'ي',
+    };
+    replacements.forEach((from, to) => key = key.replaceAll(from, to));
+    return key.replaceAll(RegExp(r'[ًٌٍَُِّْـ]'), '');
+  }
+
+  String _studentIdentity(Map<String, dynamic> student) =>
+      '${student['studentId'] ?? student['id'] ?? ''}';
+
+  void _rememberStudentOrder(List<Map<String, dynamic>> roster) {
+    _studentApiOrder.clear();
+    for (var i = 0; i < roster.length; i++) {
+      _studentApiOrder[_studentIdentity(roster[i])] = i;
+    }
+  }
+
+  void _applyStudentSorting() {
+    if (_sortStudentsAlphabetically) {
+      students.sort((a, b) => _alphabeticalKey(_studentName(a))
+          .compareTo(_alphabeticalKey(_studentName(b))));
+    } else {
+      students.sort((a, b) =>
+          (_studentApiOrder[_studentIdentity(a)] ?? 0)
+              .compareTo(_studentApiOrder[_studentIdentity(b)] ?? 0));
+    }
+  }
+
+  void _setAlphabeticalSorting(bool enabled) {
+    setState(() {
+      _sortStudentsAlphabetically = enabled;
+      _applyStudentSorting();
+    });
+  }
+
+  Widget _studentSortingControl(bool dark) => Container(
+        margin: const EdgeInsets.only(top: 8, bottom: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+        decoration: BoxDecoration(
+          color: dark ? const Color(0xFF242424) : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: SwitchListTile.adaptive(
+          contentPadding: EdgeInsets.zero,
+          value: _sortStudentsAlphabetically,
+          onChanged: _setAlphabeticalSorting,
+          title: const Text('ترتيب أسماء الطلاب أبجديًا',
+              style: TextStyle(fontWeight: FontWeight.w600)),
+          subtitle: const Text('يبدأ الترتيب مفعّلًا افتراضيًا'),
+          secondary: const Icon(Icons.sort_by_alpha_rounded),
+        ),
+      );
+
   Future<void> _loadStudents() async {
     if (stageId == null || subjectId == null) return;
     setState(() {
@@ -268,6 +329,8 @@ class _DailyAbsenceScreenState extends State<DailyAbsenceScreen> {
       if (!mounted) return;
       setState(() {
         students = parsed;
+        _rememberStudentOrder(parsed);
+        _applyStudentSorting();
         loadingStudents = false;
       });
     } catch (e) {
@@ -312,6 +375,33 @@ class _DailyAbsenceScreenState extends State<DailyAbsenceScreen> {
       _message('لا توجد قائمة طلاب لحفظ الغياب.');
       return;
     }
+    final absentCount = students.where((student) => _bool(student['isAbsent'])).length;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('تأكيد حفظ الغياب'),
+        content: Text(
+          'هل تريد حفظ بيانات الغياب في EMIS؟\n\n'
+          'التاريخ: ${_dateString(selectedDate)}\n'
+          'عدد الطلاب: ${students.length}\n'
+          'عدد الغائبين المحددّين: $absentCount',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            icon: const Icon(Icons.save_rounded),
+            label: const Text('تأكيد الحفظ'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
     setState(() {
       saving = true;
       error = null;
@@ -484,6 +574,7 @@ class _DailyAbsenceScreenState extends State<DailyAbsenceScreen> {
                         ),
                       ],
                     ),
+                    _studentSortingControl(dark),
                     const SizedBox(height: 8),
                     if (students.isEmpty)
                       const Padding(
