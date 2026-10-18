@@ -1484,7 +1484,7 @@ class _GradeEntryScreenState extends State<GradeEntryScreen> {
                     enabled: !loadingStudents,
                     readOnly: _isCalculatedExam,
                     controller: grades[id],
-                    keyboardType: TextInputType.number,
+                    keyboardType: TextInputType.text,
                     inputFormatters: [const GradeValueInputFormatter()],
                     textAlign: TextAlign.center,
                     style: TextStyle(
