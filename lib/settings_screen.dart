@@ -60,13 +60,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _setVoiceEnabled(bool enabled) async {
-    await AppCore.setVoiceInputEnabled(enabled);
+    // حدّث القيمة المعروضة قبل انتظار SharedPreferences حتى لا يرجع المفتاح
+    // بصرياً إلى قيمته القديمة أثناء انتظار التخزين.
+    final save = AppCore.setVoiceInputEnabled(enabled);
+    if (mounted) setState(() {});
+    await save;
     if (mounted) setState(() {});
   }
 
   Future<void> _setVoiceEngine(String? engine) async {
     if (engine == null) return;
-    await AppCore.setVoiceRecognitionEngine(engine);
+    final save = AppCore.setVoiceRecognitionEngine(engine);
+    if (mounted) setState(() {});
+    await save;
     if (mounted) setState(() {});
     if (engine == 'google') await _checkGoogleSpeech();
   }
@@ -347,9 +353,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                       value: AppCore.voiceSequentialAutoStart,
                       activeColor: Colors.green,
-                      onChanged: (value) async {
-                        await AppCore.setVoiceSequentialAutoStart(value);
+                      onChanged: (value) {
+                        final save = AppCore.setVoiceSequentialAutoStart(value);
                         if (mounted) setState(() {});
+                        save.then((_) {
+                          if (mounted) setState(() {});
+                        }).catchError((Object error) {
+                          debugPrint('تعذر حفظ إعداد التنقل الصوتي: $error');
+                        });
                       },
                     ),
                     const Divider(),
