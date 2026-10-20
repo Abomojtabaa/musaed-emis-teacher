@@ -34,13 +34,14 @@ class AppCore {
     voiceRestartDelayMs = prefs.getInt('voiceRestartDelayMs') ?? 4100;
     voiceFinalizationTimeoutMs = prefs.getInt('voiceFinalizationTimeoutMs') ?? 2400;
     voiceArrowOpacity = prefs.getDouble('voiceArrowOpacity') ?? 0.25;
-    voiceArrowOpacity = voiceArrowOpacity.clamp(0.20, 0.90).toDouble();
+    voiceArrowOpacity = voiceArrowOpacity.clamp(0.20, 0.90);
   }
 
   static Future<void> saveThemePreference(bool isDark) async {
+    // حدّث الواجهة فوراً؛ لا تجعل استجابة التخزين تتحكم باستجابة المفتاح.
+    themeNotifier.value = isDark ? ThemeMode.dark : ThemeMode.light;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('isDark', isDark);
-    themeNotifier.value = isDark ? ThemeMode.dark : ThemeMode.light;
   }
 
   static Future<void> setVoiceInputEnabled(bool enabled) async {
@@ -71,35 +72,24 @@ class AppCore {
     int? finalizationTimeoutMs,
     double? arrowOpacity,
   }) async {
+    // حدّث الحالة داخل الذاكرة مباشرةً حتى لا تتأخر واجهة الإعدادات
+    // أو تقفز القيمة القديمة أثناء الكتابة إلى SharedPreferences.
+    if (autoRestart != null) voiceAutoRestart = autoRestart;
+    if (possibleSilenceMs != null) voicePossibleSilenceMs = possibleSilenceMs.clamp(1000, 50000).toInt();
+    if (completeSilenceMs != null) voiceCompleteSilenceMs = completeSilenceMs.clamp(1000, 50000).toInt();
+    if (minimumSpeechMs != null) voiceMinimumSpeechMs = minimumSpeechMs.clamp(100, 6000).toInt();
+    if (restartDelayMs != null) voiceRestartDelayMs = restartDelayMs.clamp(0, 9000).toInt();
+    if (finalizationTimeoutMs != null) voiceFinalizationTimeoutMs = finalizationTimeoutMs.clamp(500, 6000).toInt();
+    if (arrowOpacity != null) voiceArrowOpacity = arrowOpacity.clamp(0.20, 0.90);
+
     final prefs = await SharedPreferences.getInstance();
-    if (autoRestart != null) {
-      voiceAutoRestart = autoRestart;
-      await prefs.setBool('voiceAutoRestart', autoRestart);
-    }
-    if (possibleSilenceMs != null) {
-      voicePossibleSilenceMs = possibleSilenceMs;
-      await prefs.setInt('voicePossibleSilenceMs', possibleSilenceMs);
-    }
-    if (completeSilenceMs != null) {
-      voiceCompleteSilenceMs = completeSilenceMs;
-      await prefs.setInt('voiceCompleteSilenceMs', completeSilenceMs);
-    }
-    if (minimumSpeechMs != null) {
-      voiceMinimumSpeechMs = minimumSpeechMs;
-      await prefs.setInt('voiceMinimumSpeechMs', minimumSpeechMs);
-    }
-    if (restartDelayMs != null) {
-      voiceRestartDelayMs = restartDelayMs;
-      await prefs.setInt('voiceRestartDelayMs', restartDelayMs);
-    }
-    if (finalizationTimeoutMs != null) {
-      voiceFinalizationTimeoutMs = finalizationTimeoutMs;
-      await prefs.setInt('voiceFinalizationTimeoutMs', finalizationTimeoutMs);
-    }
-    if (arrowOpacity != null) {
-      voiceArrowOpacity = arrowOpacity.clamp(0.20, 0.90).toDouble();
-      await prefs.setDouble('voiceArrowOpacity', voiceArrowOpacity);
-    }
+    if (autoRestart != null) await prefs.setBool('voiceAutoRestart', voiceAutoRestart);
+    if (possibleSilenceMs != null) await prefs.setInt('voicePossibleSilenceMs', voicePossibleSilenceMs);
+    if (completeSilenceMs != null) await prefs.setInt('voiceCompleteSilenceMs', voiceCompleteSilenceMs);
+    if (minimumSpeechMs != null) await prefs.setInt('voiceMinimumSpeechMs', voiceMinimumSpeechMs);
+    if (restartDelayMs != null) await prefs.setInt('voiceRestartDelayMs', voiceRestartDelayMs);
+    if (finalizationTimeoutMs != null) await prefs.setInt('voiceFinalizationTimeoutMs', voiceFinalizationTimeoutMs);
+    if (arrowOpacity != null) await prefs.setDouble('voiceArrowOpacity', voiceArrowOpacity);
   }
 
   static Future<void> resetVoiceSettings() async {
@@ -119,8 +109,8 @@ class AppCore {
       await prefs.remove(key);
     }
   }
-  static void toggleTheme() {
-    bool isDark = themeNotifier.value == ThemeMode.dark;
-    saveThemePreference(!isDark);
+  static Future<void> toggleTheme() async {
+    final isDark = themeNotifier.value == ThemeMode.dark;
+    await saveThemePreference(!isDark);
   }
 }

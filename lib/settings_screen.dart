@@ -34,7 +34,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       });
     }
     try {
-      final info = await GoogleSpeechService.getInfo().timeout(const Duration(seconds: 3));
+      final info = await GoogleSpeechService.getInfo();
       final available = info['available'] == true;
       final message = (info['message'] ?? info['name'] ?? info['service'] ?? '')
           .toString()
@@ -60,36 +60,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _setVoiceEnabled(bool enabled) async {
-    if (enabled) {
-      try {
-        final permission = await Permission.microphone
-            .request()
-            .timeout(const Duration(seconds: 5));
-        if (!permission.isGranted) {
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('يجب منح التطبيق صلاحية الميكروفون من إعدادات Android أولاً.'),
-              backgroundColor: Colors.orange,
-            ),
-          );
-          return;
-        }
-      } catch (e) {
-        debugPrint('Permission request error: $e');
-      }
-    }
-    AppCore.setVoiceInputEnabled(enabled);
+    await AppCore.setVoiceInputEnabled(enabled);
     if (mounted) setState(() {});
   }
 
-  void _setVoiceEngine(String? engine) {
+  Future<void> _setVoiceEngine(String? engine) async {
     if (engine == null) return;
-    AppCore.setVoiceRecognitionEngine(engine);
+    await AppCore.setVoiceRecognitionEngine(engine);
     if (mounted) setState(() {});
+    if (engine == 'google') await _checkGoogleSpeech();
   }
 
-  void _setVoiceSetting({
+  Future<void> _setVoiceSetting({
     bool? autoRestart,
     int? possibleSilenceMs,
     int? completeSilenceMs,
@@ -97,8 +79,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     int? restartDelayMs,
     int? finalizationTimeoutMs,
     double? arrowOpacity,
-  }) {
-    AppCore.saveVoiceSettings(
+  }) async {
+    // اظهر القيمة الجديدة فوراً ولا تنتظر الكتابة إلى التخزين.
+    final save = AppCore.saveVoiceSettings(
       autoRestart: autoRestart,
       possibleSilenceMs: possibleSilenceMs,
       completeSilenceMs: completeSilenceMs,
@@ -108,15 +91,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
       arrowOpacity: arrowOpacity,
     );
     if (mounted) setState(() {});
+    await save;
+    if (mounted) setState(() {});
   }
 
-  void _resetVoiceSettings() {
-    AppCore.resetVoiceSettings();
-    if (!mounted) return;
-    setState(() {});
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('تمت إعادة جميع إعدادات الميكروفون إلى القيم الافتراضية.')),
-    );
+  Future<void> _resetVoiceSettings() async {
+    await AppCore.resetVoiceSettings();
+    if (mounted) setState(() {});
   }
 
   Future<void> _logout() async {
@@ -256,7 +237,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ],
         ),
         Slider(
-          value: value.clamp(min, max),
+          value: value.clamp(min, max).toDouble(),
           min: min,
           max: max,
           divisions: divisions,
@@ -329,9 +310,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   trailing: Switch(
                     value: isDark,
                     activeColor: Colors.amber,
-                    onChanged: (val) async {
-                      await AppCore.saveThemePreference(val);
-                      if (mounted) setState(() {});
+                    onChanged: (val) {
+                      // تغيير الحالة فوراً؛ ثم حفظها في الخلفية.
+                      AppCore.themeNotifier.value = val ? ThemeMode.dark : ThemeMode.light;
+                      setState(() {});
+                      AppCore.saveThemePreference(val).catchError((Object error) {
+                        debugPrint('تعذر حفظ إعداد الوضع الداكن: $error');
+                      });
                     },
                   ),
                 ),

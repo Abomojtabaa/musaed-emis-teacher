@@ -75,10 +75,7 @@ class _LoadingDataScreenState extends State<LoadingDataScreen> {
           .timeout(const Duration(seconds: 15));
       if (response.statusCode != 200) return false;
       final decoded = _decode(response);
-      final next = decoded is Map
-          ? (decoded['accessToken'] ?? decoded['token'] ??
-              (decoded['data'] is Map ? decoded['data']['accessToken'] : null))?.toString()
-          : null;
+      final next = decoded is Map ? decoded['accessToken']?.toString() : null;
       if (next == null || next.trim().isEmpty) return false;
       _activeToken = next.trim();
       return true;
@@ -96,26 +93,14 @@ class _LoadingDataScreenState extends State<LoadingDataScreen> {
             .get(uri, headers: _headers)
             .timeout(const Duration(seconds: 15));
         last = response;
-        if (response.statusCode >= 200 && response.statusCode < 300) {
-          return response;
-        }
         if (response.statusCode == 401) {
           if (!refreshed && await _refreshAccessToken()) {
             refreshed = true;
-            await Future<void>.delayed(const Duration(milliseconds: 300));
             continue;
           }
           throw _SessionExpired();
         }
-        // 403 قد يكون صلاحية خاصة بمسار معين؛ نجرّب تحديث الرمز مرة واحدة فقط.
-        if (response.statusCode == 403) {
-          if (!refreshed && await _refreshAccessToken()) {
-            refreshed = true;
-            await Future<void>.delayed(const Duration(milliseconds: 400));
-            continue;
-          }
-          break;
-        }
+        if (response.statusCode == 200) return response;
       } on _SessionExpired {
         rethrow;
       } catch (_) {
@@ -129,14 +114,9 @@ class _LoadingDataScreenState extends State<LoadingDataScreen> {
   }
 
   dynamic _decode(http.Response response) {
-    try {
-      final text = utf8.decode(response.bodyBytes, allowMalformed: true).trim();
-      if (text.isEmpty) return <String, dynamic>{};
-      return jsonDecode(text);
-    } catch (e) {
-      debugPrint('تعذر قراءة JSON من EMIS: $e');
-      return <String, dynamic>{};
-    }
+    final text = utf8.decode(response.bodyBytes);
+    if (text.trim().isEmpty) return <String, dynamic>{};
+    return jsonDecode(text);
   }
 
   List<dynamic> _extractList(dynamic decoded, String label) {
